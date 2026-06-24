@@ -111,6 +111,15 @@ WRITABLE_EXEC_PREFIXES = (
     "/run/user/",
 )
 
+REDACTION_MARKER = "[redacted]"
+
+SENSITIVE_ARG_RE = re.compile(
+    r"(token|secret|passwd|password|credential|api[-_]?key|access[-_]?key|private[-_]?key|auth)",
+    re.IGNORECASE,
+)
+
+JWT_RE = re.compile(r"^[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}$")
+
 SEVERITY_SCORE = {
     "info": 0,
     "low": 1,
@@ -327,7 +336,43 @@ def read_cmdline(pid: int) -> str:
         raw = (PROC_ROOT / str(pid) / "cmdline").read_bytes()
     except (FileNotFoundError, PermissionError, ProcessLookupError):
         return ""
-    return raw.replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
+
+    args = [
+        part.decode("utf-8", errors="replace")
+        for part in raw.split(b"\x00")
+        if part
+    ]
+    return redact_cmdline_args(args)
+
+
+def redact_cmdline_args(args: list[str]) -> str:
+    redacted_args: list[str] = []
+    redact_next = False
+
+    for arg in args:
+        if redact_next:
+            redacted_args.append(REDACTION_MARKER)
+            redact_next = False
+            continue
+
+        if JWT_RE.match(arg):
+            redacted_args.append(REDACTION_MARKER)
+            continue
+
+        if "=" in arg:
+            key, _value = arg.split("=", 1)
+            if SENSITIVE_ARG_RE.search(key):
+                redacted_args.append(f"{key}={REDACTION_MARKER}")
+                continue
+
+        if arg.startswith("-") and SENSITIVE_ARG_RE.search(arg.lstrip("-")):
+            redacted_args.append(arg)
+            redact_next = True
+            continue
+
+        redacted_args.append(arg)
+
+    return " ".join(redacted_args)
 
 
 def get_process_info(pid: int) -> ProcessInfo:

@@ -19,4 +19,5 @@ Useful options:
 
 The script is heuristic triage only. It can highlight network activity and
 process metadata worth reviewing, but it cannot prove whether a host is clean or
-infected.
+infected. Command-line values that look like tokens, passwords, secrets, or API
+keys are redacted from the report.
